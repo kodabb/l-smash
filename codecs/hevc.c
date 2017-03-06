@@ -52,7 +52,34 @@ typedef enum
     HEVC_SLICE_TYPE_I = 2,
 } hevc_slice_type;
 
-void lsmash_destroy_hevc_parameter_arrays
+static int hevc_alloc_parameter_arrays
+(
+    lsmash_hevc_specific_parameters_t *param
+)
+{
+    assert( param );
+    if( param->parameter_arrays )
+        return 0;
+    lsmash_hevc_parameter_arrays_t *parameter_arrays = lsmash_malloc_zero( sizeof(lsmash_hevc_parameter_arrays_t) );
+    if( !parameter_arrays )
+        return LSMASH_ERR_MEMORY_ALLOC;
+    param->parameter_arrays = parameter_arrays;
+    parameter_arrays->ps_array[HEVC_DCR_NALU_TYPE_VPS       ].array_completeness = 1;
+    parameter_arrays->ps_array[HEVC_DCR_NALU_TYPE_VPS       ].NAL_unit_type      = HEVC_NALU_TYPE_VPS;
+    parameter_arrays->ps_array[HEVC_DCR_NALU_TYPE_SPS       ].array_completeness = 1;
+    parameter_arrays->ps_array[HEVC_DCR_NALU_TYPE_SPS       ].NAL_unit_type      = HEVC_NALU_TYPE_SPS;
+    parameter_arrays->ps_array[HEVC_DCR_NALU_TYPE_PPS       ].array_completeness = 1;
+    parameter_arrays->ps_array[HEVC_DCR_NALU_TYPE_PPS       ].NAL_unit_type      = HEVC_NALU_TYPE_PPS;
+    parameter_arrays->ps_array[HEVC_DCR_NALU_TYPE_PREFIX_SEI].array_completeness = 0;
+    parameter_arrays->ps_array[HEVC_DCR_NALU_TYPE_PREFIX_SEI].NAL_unit_type      = HEVC_NALU_TYPE_PREFIX_SEI;
+    parameter_arrays->ps_array[HEVC_DCR_NALU_TYPE_SUFFIX_SEI].array_completeness = 0;
+    parameter_arrays->ps_array[HEVC_DCR_NALU_TYPE_SUFFIX_SEI].NAL_unit_type      = HEVC_NALU_TYPE_SUFFIX_SEI;
+    for( int i = 0; i < HEVC_DCR_NALU_TYPE_NUM; i++ )
+        lsmash_list_init( param->parameter_arrays->ps_array[i].list, isom_remove_dcr_ps );
+    return 0;
+}
+
+static void hevc_deallocate_parameter_arrays
 (
     lsmash_hevc_specific_parameters_t *param
 )
@@ -60,9 +87,16 @@ void lsmash_destroy_hevc_parameter_arrays
     if( !param || !param->parameter_arrays )
         return;
     for( int i = 0; i < HEVC_DCR_NALU_TYPE_NUM; i++ )
-        lsmash_remove_entries( param->parameter_arrays->ps_array[i].list, isom_remove_dcr_ps );
-    lsmash_free( param->parameter_arrays );
-    param->parameter_arrays = NULL;
+        lsmash_list_remove_entries( param->parameter_arrays->ps_array[i].list );
+    lsmash_freep( &param->parameter_arrays );
+}
+
+void lsmash_destroy_hevc_parameter_arrays
+(
+    lsmash_hevc_specific_parameters_t *param
+)
+{
+    hevc_deallocate_parameter_arrays( param );
 }
 
 void hevc_destruct_specific_data
@@ -72,7 +106,7 @@ void hevc_destruct_specific_data
 {
     if( !data )
         return;
-    lsmash_destroy_hevc_parameter_arrays( data );
+    hevc_deallocate_parameter_arrays( data );
     lsmash_free( data );
 }
 
@@ -95,11 +129,11 @@ void hevc_cleanup_parser
 {
     if( !info )
         return;
-    lsmash_remove_entries( info->vps_list, NULL );
-    lsmash_remove_entries( info->sps_list, NULL );
-    lsmash_remove_entries( info->pps_list, hevc_remove_pps );
-    lsmash_destroy_hevc_parameter_arrays( &info->hvcC_param );
-    lsmash_destroy_hevc_parameter_arrays( &info->hvcC_param_next );
+    lsmash_list_remove_entries( info->vps_list );
+    lsmash_list_remove_entries( info->sps_list );
+    lsmash_list_remove_entries( info->pps_list );
+    hevc_deallocate_parameter_arrays( &info->hvcC_param );
+    hevc_deallocate_parameter_arrays( &info->hvcC_param_next );
     lsmash_destroy_multiple_buffers( info->buffer.bank );
     lsmash_bits_adhoc_cleanup( info->bits );
     info->bits = NULL;
@@ -131,9 +165,9 @@ int hevc_setup_parser
         lsmash_destroy_multiple_buffers( sb->bank );
         return LSMASH_ERR_MEMORY_ALLOC;
     }
-    lsmash_init_entry_list( info->vps_list );
-    lsmash_init_entry_list( info->sps_list );
-    lsmash_init_entry_list( info->pps_list );
+    lsmash_list_init_simple( info->vps_list );
+    lsmash_list_init_simple( info->sps_list );
+    lsmash_list_init( info->pps_list, hevc_remove_pps );
     info->prev_nalu_type = HEVC_NALU_TYPE_UNKNOWN;
     return 0;
 }
@@ -276,7 +310,7 @@ static hevc_vps_t *hevc_get_vps
     if( !vps )
         return NULL;
     vps->video_parameter_set_id = vps_id;
-    if( lsmash_add_entry( vps_list, vps ) < 0 )
+    if( lsmash_list_add_entry( vps_list, vps ) < 0 )
     {
         lsmash_free( vps );
         return NULL;
@@ -304,7 +338,7 @@ static hevc_sps_t *hevc_get_sps
     if( !sps )
         return NULL;
     sps->seq_parameter_set_id = sps_id;
-    if( lsmash_add_entry( sps_list, sps ) < 0 )
+    if( lsmash_list_add_entry( sps_list, sps ) < 0 )
     {
         lsmash_free( sps );
         return NULL;
@@ -332,7 +366,7 @@ static hevc_pps_t *hevc_get_pps
     if( !pps )
         return NULL;
     pps->pic_parameter_set_id = pps_id;
-    if( lsmash_add_entry( pps_list, pps ) < 0 )
+    if( lsmash_list_add_entry( pps_list, pps ) < 0 )
     {
         lsmash_free( pps );
         return NULL;
@@ -2255,31 +2289,6 @@ static inline void hevc_reorder_parameter_set_ascending_id
     entry->next = new_entry;
 }
 
-static inline int hevc_alloc_parameter_arrays
-(
-    lsmash_hevc_specific_parameters_t *param
-)
-{
-    assert( param );
-    if( param->parameter_arrays )
-        return 0;
-    lsmash_hevc_parameter_arrays_t *parameter_arrays = lsmash_malloc_zero( sizeof(lsmash_hevc_parameter_arrays_t) );
-    if( !parameter_arrays )
-        return LSMASH_ERR_MEMORY_ALLOC;
-    param->parameter_arrays = parameter_arrays;
-    parameter_arrays->ps_array[HEVC_DCR_NALU_TYPE_VPS       ].array_completeness = 1;
-    parameter_arrays->ps_array[HEVC_DCR_NALU_TYPE_VPS       ].NAL_unit_type      = HEVC_NALU_TYPE_VPS;
-    parameter_arrays->ps_array[HEVC_DCR_NALU_TYPE_SPS       ].array_completeness = 1;
-    parameter_arrays->ps_array[HEVC_DCR_NALU_TYPE_SPS       ].NAL_unit_type      = HEVC_NALU_TYPE_SPS;
-    parameter_arrays->ps_array[HEVC_DCR_NALU_TYPE_PPS       ].array_completeness = 1;
-    parameter_arrays->ps_array[HEVC_DCR_NALU_TYPE_PPS       ].NAL_unit_type      = HEVC_NALU_TYPE_PPS;
-    parameter_arrays->ps_array[HEVC_DCR_NALU_TYPE_PREFIX_SEI].array_completeness = 0;
-    parameter_arrays->ps_array[HEVC_DCR_NALU_TYPE_PREFIX_SEI].NAL_unit_type      = HEVC_NALU_TYPE_PREFIX_SEI;
-    parameter_arrays->ps_array[HEVC_DCR_NALU_TYPE_SUFFIX_SEI].array_completeness = 0;
-    parameter_arrays->ps_array[HEVC_DCR_NALU_TYPE_SUFFIX_SEI].NAL_unit_type      = HEVC_NALU_TYPE_SUFFIX_SEI;
-    return 0;
-}
-
 int lsmash_append_hevc_dcr_nalu
 (
     lsmash_hevc_specific_parameters_t *param,
@@ -2305,7 +2314,7 @@ int lsmash_append_hevc_dcr_nalu
         isom_dcr_ps_entry_t *ps = isom_create_ps_entry( ps_data, ps_length );
         if( !ps )
             return LSMASH_ERR_MEMORY_ALLOC;
-        if( lsmash_add_entry( ps_list, ps ) < 0 )
+        if( lsmash_list_add_entry( ps_list, ps ) < 0 )
         {
             isom_remove_dcr_ps( ps );
             return LSMASH_ERR_MEMORY_ALLOC;
@@ -2346,7 +2355,7 @@ int lsmash_append_hevc_dcr_nalu
         ps = isom_create_ps_entry( ps_data, ps_length );
         if( !ps )
             return LSMASH_ERR_MEMORY_ALLOC;
-        if( lsmash_add_entry( ps_list, ps ) < 0 )
+        if( lsmash_list_add_entry( ps_list, ps ) < 0 )
         {
             isom_remove_dcr_ps( ps );
             return LSMASH_ERR_MEMORY_ALLOC;
@@ -2521,7 +2530,7 @@ int lsmash_append_hevc_dcr_nalu
     err = 0;
     goto clean;
 fail:
-    ps = (isom_dcr_ps_entry_t *)lsmash_get_entry_data( ps_list, ps_list->entry_count );
+    ps = (isom_dcr_ps_entry_t *)lsmash_list_get_entry_data( ps_list, ps_list->entry_count );
     if( ps )
         ps->unused = 1;
 clean:
@@ -2628,7 +2637,7 @@ static int hevc_move_dcr_nalu_entry
         if( !dst_entry )
         {
             /* Move the parameter set. */
-            if( lsmash_add_entry( dst_ps_list, src_ps ) < 0 )
+            if( lsmash_list_add_entry( dst_ps_list, src_ps ) < 0 )
                 return LSMASH_ERR_MEMORY_ALLOC;
             src_entry->data = NULL;
         }
@@ -2670,7 +2679,7 @@ int hevc_move_pending_hvcC_param
     info->hvcC_param                  = info->hvcC_param_next;
     info->hvcC_param.parameter_arrays = parameter_arrays;
     /* No pending hvcC. */
-    lsmash_destroy_hevc_parameter_arrays( &info->hvcC_param_next );
+    hevc_deallocate_parameter_arrays( &info->hvcC_param_next );
     uint8_t lengthSizeMinusOne = info->hvcC_param_next.lengthSizeMinusOne;
     memset( &info->hvcC_param_next, 0, sizeof(lsmash_hevc_specific_parameters_t) );
     info->hvcC_param_next.lengthSizeMinusOne = lengthSizeMinusOne;
@@ -3071,12 +3080,12 @@ static inline int hevc_copy_dcr_nalu_array
         isom_dcr_ps_entry_t *dst_ps = isom_create_ps_entry( src_ps->nalUnit, src_ps->nalUnitLength );
         if( !dst_ps )
         {
-            lsmash_destroy_hevc_parameter_arrays( dst_data );
+            hevc_deallocate_parameter_arrays( dst_data );
             return LSMASH_ERR_MEMORY_ALLOC;
         }
-        if( lsmash_add_entry( dst_ps_list, dst_ps ) < 0 )
+        if( lsmash_list_add_entry( dst_ps_list, dst_ps ) < 0 )
         {
-            lsmash_destroy_hevc_parameter_arrays( dst_data );
+            hevc_deallocate_parameter_arrays( dst_data );
             isom_remove_dcr_ps( dst_ps );
             return LSMASH_ERR_MEMORY_ALLOC;
         }
@@ -3094,7 +3103,7 @@ int hevc_copy_codec_specific
     assert( dst && dst->format == LSMASH_CODEC_SPECIFIC_FORMAT_STRUCTURED && dst->data.structured );
     lsmash_hevc_specific_parameters_t *src_data = (lsmash_hevc_specific_parameters_t *)src->data.structured;
     lsmash_hevc_specific_parameters_t *dst_data = (lsmash_hevc_specific_parameters_t *)dst->data.structured;
-    lsmash_destroy_hevc_parameter_arrays( dst_data );
+    hevc_deallocate_parameter_arrays( dst_data );
     *dst_data = *src_data;
     if( !src_data->parameter_arrays )
         return 0;

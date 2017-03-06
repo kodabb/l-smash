@@ -851,7 +851,7 @@ typedef struct
     uint16_t font_ID;
     /* Pascal string */
     uint8_t font_name_length;
-    char *font_name;
+    char   *font_name;
 } isom_font_record_t;
 
 /* Font Table Box */
@@ -2550,6 +2550,7 @@ isom_free_t *isom_add_free( void *parent_box );
 isom_styp_t *isom_add_styp( lsmash_file_t *file );
 isom_sidx_t *isom_add_sidx( lsmash_file_t *file );
 
+void isom_remove_extension_box( isom_box_t *ext );
 void isom_remove_sample_description( isom_sample_entry_t *sample );
 void isom_remove_unknown_box( isom_unknown_box_t *unknown_box );
 void isom_remove_sample_pool( isom_sample_pool_t *pool );

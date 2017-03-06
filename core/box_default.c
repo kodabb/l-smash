@@ -252,5 +252,6 @@ void *allocate_box_by_default
     if( !box )
         return (void *)nonexist_ptr;
     box->manager &= ~LSMASH_NON_EXISTING_BOX;
+    lsmash_list_init( &box->extensions, isom_remove_extension_box );
     return (void *)box;
 }
